@@ -197,6 +197,7 @@ async fn main() -> Result<()> {
                 args.force,
             )
             .await?;
+            db.close().await;
         }
         Some(interval_secs) => {
             info!(interval_secs, "watch mode enabled — press Ctrl-C to stop");

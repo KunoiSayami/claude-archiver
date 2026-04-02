@@ -31,6 +31,10 @@ impl Db {
         &self.pool
     }
 
+    pub async fn close(self) {
+        self.pool.close().await;
+    }
+
     pub async fn upsert_project(&self, slug: &str, cwd: Option<&str>) -> Result<()> {
         sqlx::query(
             "INSERT INTO projects(slug, cwd) VALUES(?, ?)
