@@ -75,3 +75,38 @@ pub fn discover_sessions(project_dir: &Path) -> Result<Vec<SessionEntry>> {
     sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
     Ok(sessions)
 }
+
+pub struct PlanEntry {
+    pub slug: String,
+    pub path: PathBuf,
+    pub mtime: u64,
+}
+
+pub fn discover_plans(plans_dir: &Path) -> Result<Vec<PlanEntry>> {
+    let mut plans = Vec::new();
+
+    for entry in std::fs::read_dir(plans_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let slug = path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if slug.is_empty() {
+                continue;
+            }
+            let mtime = entry
+                .metadata()?
+                .modified()?
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            plans.push(PlanEntry { slug, path, mtime });
+        }
+    }
+
+    plans.sort_by(|a, b| a.slug.cmp(&b.slug));
+    Ok(plans)
+}

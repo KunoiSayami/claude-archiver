@@ -49,9 +49,15 @@ fn default_source_path() -> Result<PathBuf> {
     Ok(home.join(".claude").join("projects"))
 }
 
+fn default_plans_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home dir"))?;
+    Ok(home.join(".claude").join("plans"))
+}
+
 async fn run_once(
     db: &Db,
     source_path: &PathBuf,
+    plans_path: &PathBuf,
     project_filter: Option<&str>,
     force: bool,
 ) -> Result<()> {
@@ -131,6 +137,28 @@ async fn run_once(
     }
 
     info!(total_files, skipped, messages, "run complete");
+
+    // ── Plan files ────────────────────────────────────────────────────────────
+    if plans_path.is_dir() {
+        let plans = scanner::discover_plans(plans_path)?;
+        let mut plans_archived = 0usize;
+        for plan in plans {
+            if !force && db.is_plan_current(&plan.slug, plan.mtime).await? {
+                continue;
+            }
+            match std::fs::read_to_string(&plan.path) {
+                Ok(content) => {
+                    db.insert_plan_revision(&plan.slug, &content, plan.mtime)
+                        .await?;
+                    debug!(slug = %plan.slug, "archived plan");
+                    plans_archived += 1;
+                }
+                Err(e) => warn!(slug = %plan.slug, error = %e, "could not read plan file"),
+            }
+        }
+        info!(plans_archived, "plans archived");
+    }
+
     Ok(())
 }
 
@@ -153,6 +181,7 @@ async fn main() -> Result<()> {
         Some(ref p) => p.clone(),
         None => default_source_path()?,
     };
+    let plans_path = default_plans_path()?;
 
     info!(db = %db_path.display(), source = %source_path.display(), "claude-archiver starting");
 
@@ -160,13 +189,26 @@ async fn main() -> Result<()> {
 
     match args.watch {
         None => {
-            run_once(&db, &source_path, args.project.as_deref(), args.force).await?;
+            run_once(
+                &db,
+                &source_path,
+                &plans_path,
+                args.project.as_deref(),
+                args.force,
+            )
+            .await?;
         }
         Some(interval_secs) => {
             info!(interval_secs, "watch mode enabled — press Ctrl-C to stop");
             loop {
-                if let Err(e) =
-                    run_once(&db, &source_path, args.project.as_deref(), args.force).await
+                if let Err(e) = run_once(
+                    &db,
+                    &source_path,
+                    &plans_path,
+                    args.project.as_deref(),
+                    args.force,
+                )
+                .await
                 {
                     warn!(error = %e, "run failed, will retry");
                 }

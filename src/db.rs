@@ -139,4 +139,29 @@ impl Db {
         .await?;
         Ok(())
     }
+
+    pub async fn insert_plan_revision(&self, slug: &str, content: &str, mtime: u64) -> Result<()> {
+        let mtime = mtime as i64;
+        sqlx::query(
+            "INSERT INTO plan_files(slug, content, modified_at) VALUES(?,?,?)
+             ON CONFLICT(slug, modified_at) DO NOTHING",
+        )
+        .bind(slug)
+        .bind(content)
+        .bind(mtime)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn is_plan_current(&self, slug: &str, mtime: u64) -> Result<bool> {
+        let mtime = mtime as i64;
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT modified_at FROM plan_files WHERE slug = ? AND modified_at = ?")
+                .bind(slug)
+                .bind(mtime)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.is_some())
+    }
 }
