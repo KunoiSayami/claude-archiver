@@ -1,15 +1,15 @@
 [package]
 name = "claude-archiver"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-sqlx       = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate"] }
-tokio      = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-serde      = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-clap       = { version = "4", features = ["derive"] }
-anyhow     = "1"
-dirs       = "5"
-tracing              = "0.1"
-tracing-subscriber   = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

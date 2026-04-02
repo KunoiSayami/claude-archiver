@@ -83,6 +83,7 @@ async fn run_once(
             db.upsert_session(&session.session_id, &project.slug, None, None)
                 .await?;
 
+            //tracing::debug!("Read {}", &session.path.display());
             let events = match parser::parse_jsonl(&session.path) {
                 Ok(e) => e,
                 Err(e) => {

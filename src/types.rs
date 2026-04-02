@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 /// Top-level discriminant — we first parse only the "type" field,
 /// then branch to the concrete struct.
@@ -29,8 +30,32 @@ pub struct UserEvent {
 
 #[derive(Debug, Deserialize)]
 pub struct UserMessage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_content")]
     pub content: Vec<ContentBlock>,
+}
+
+/// `content` may be a JSON array of blocks OR a plain string.
+/// Normalise a bare string into a single text ContentBlock.
+fn deserialize_content<'de, D>(de: D) -> Result<Vec<ContentBlock>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = Value::deserialize(de)?;
+    match v {
+        Value::Array(arr) => {
+            serde_json::from_value(Value::Array(arr)).map_err(serde::de::Error::custom)
+        }
+        Value::String(s) => Ok(vec![ContentBlock {
+            kind: "text".to_string(),
+            text: Some(s),
+            extra: serde_json::Map::new(),
+        }]),
+        Value::Null => Ok(vec![]),
+        other => Err(serde::de::Error::custom(format!(
+            "unexpected content type: {}",
+            other
+        ))),
+    }
 }
 
 // ── Assistant message ────────────────────────────────────────────────────────
