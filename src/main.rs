@@ -208,7 +208,6 @@ async fn main() -> Result<()> {
         }
         Some(interval_secs) => {
             const STEP_DOWN_AFTER: u32 = 5;
-            const STEP_DOWN_FACTOR: u64 = 2;
 
             let base_secs = interval_secs;
             let max_idle = if args.max_idle_secs < base_secs {
@@ -221,7 +220,11 @@ async fn main() -> Result<()> {
             } else {
                 args.max_idle_secs
             };
+            // Fibonacci back-off state: prev is the interval before current,
+            // current is the active sleep duration. After STEP_DOWN_AFTER idle
+            // polls the next interval = current + prev, capped at max_idle.
             let mut current_secs = base_secs;
+            let mut prev_secs = base_secs;
             let mut idle_streak: u32 = 0;
 
             info!(
@@ -257,19 +260,19 @@ async fn main() -> Result<()> {
                     }
                     idle_streak = 0;
                     current_secs = base_secs;
+                    prev_secs = base_secs;
                 } else {
                     idle_streak += 1;
-                    if idle_streak >= STEP_DOWN_AFTER {
-                        let candidate = current_secs.saturating_mul(STEP_DOWN_FACTOR).min(max_idle);
-                        if candidate != current_secs {
-                            info!(
-                                idle_streak,
-                                old = current_secs,
-                                new = candidate,
-                                "idle: slowing poll frequency"
-                            );
-                            current_secs = candidate;
-                        }
+                    if idle_streak >= STEP_DOWN_AFTER && current_secs < max_idle {
+                        let next = current_secs.saturating_add(prev_secs).min(max_idle);
+                        info!(
+                            idle_streak,
+                            old = current_secs,
+                            new = next,
+                            "idle: slowing poll frequency"
+                        );
+                        prev_secs = current_secs;
+                        current_secs = next;
                     }
                 }
 

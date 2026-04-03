@@ -41,7 +41,19 @@ Scans `~/.claude/projects/`, archives any new or changed sessions, then exits.
 claude-archiver --watch 30
 ```
 
-Polls continuously, starting at 30-second intervals. After 5 consecutive polls with no changes the interval doubles, up to a maximum idle interval (default 20 minutes). The interval resets to the base as soon as a change is detected.
+Polls continuously, starting at 30-second intervals. After 5 consecutive polls with no changes, the interval grows using a Fibonacci-like back-off (each new interval = previous two intervals summed), up to a maximum idle interval (default 20 minutes). The interval resets to the base immediately when a change is detected.
+
+With `--watch 60`, the progression looks like:
+
+| Idle poll | Interval |
+|---|---|
+| 1–5 | 60s |
+| 6 | 120s |
+| 7 | 180s |
+| 8 | 300s |
+| 9 | 480s |
+| 10 | 780s |
+| 11+ | 1200s (capped) |
 
 ```sh
 claude-archiver --watch 10 --max-idle-interval 600
