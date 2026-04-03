@@ -7,7 +7,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use db::Db;
 use parser::ParsedEvent;
@@ -41,7 +41,7 @@ struct Args {
 
 fn default_db_path() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home dir"))?;
-    Ok(home.join(".claude").join("archive.db"))
+    Ok(home.join("claude-archive.db"))
 }
 
 fn default_source_path() -> Result<PathBuf> {
@@ -79,7 +79,7 @@ async fn run_once(
             total_files += 1;
 
             if !force && db.is_file_current(&path_str, session.mtime).await? {
-                debug!(path = %path_str, "skipping unchanged file");
+                trace!(path = %path_str, "skipping unchanged file");
                 skipped += 1;
                 continue;
             }
@@ -213,9 +213,17 @@ async fn main() -> Result<()> {
                 {
                     warn!(error = %e, "run failed, will retry");
                 }
-                debug!(sleep_secs = interval_secs, "sleeping until next poll");
-                tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+
+                // Sleep until next poll, but wake immediately on Ctrl-C.
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {}
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("received Ctrl-C, shutting down");
+                        break;
+                    }
+                }
             }
+            db.close().await;
         }
     }
 
