@@ -27,6 +27,7 @@ impl Db {
         Ok(Self { pool })
     }
 
+    #[allow(unused)]
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }

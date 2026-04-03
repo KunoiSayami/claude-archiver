@@ -37,6 +37,10 @@ struct Args {
     /// Run continuously, polling every N seconds (e.g. --watch 30)
     #[arg(long, value_name = "SECONDS")]
     watch: Option<u64>,
+
+    /// Maximum polling interval when idle, in seconds (default: 1200 = 20 min)
+    #[arg(long, value_name = "SECONDS", default_value_t = 1200)]
+    max_idle_secs: u64,
 }
 
 fn default_db_path() -> Result<PathBuf> {
@@ -60,13 +64,14 @@ async fn run_once(
     plans_path: &PathBuf,
     project_filter: Option<&str>,
     force: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let projects = scanner::discover_projects(source_path, project_filter)?;
     info!(count = projects.len(), "discovered projects");
 
     let mut total_files = 0usize;
     let mut skipped = 0usize;
     let mut messages = 0usize;
+    let mut changed = false;
 
     for project in &projects {
         debug!(slug = %project.slug, "processing project");
@@ -84,6 +89,7 @@ async fn run_once(
                 continue;
             }
 
+            changed = true;
             info!(session_id = %session.session_id, slug = %project.slug, "archiving session");
 
             db.upsert_session(&session.session_id, &project.slug, None, None)
@@ -152,6 +158,7 @@ async fn run_once(
                         .await?;
                     debug!(slug = %plan.slug, "archived plan");
                     plans_archived += 1;
+                    changed = true;
                 }
                 Err(e) => warn!(slug = %plan.slug, error = %e, "could not read plan file"),
             }
@@ -159,7 +166,7 @@ async fn run_once(
         info!(plans_archived, "plans archived");
     }
 
-    Ok(())
+    Ok(changed)
 }
 
 #[tokio::main]
@@ -189,7 +196,7 @@ async fn main() -> Result<()> {
 
     match args.watch {
         None => {
-            run_once(
+            let _ = run_once(
                 &db,
                 &source_path,
                 &plans_path,
@@ -200,9 +207,31 @@ async fn main() -> Result<()> {
             db.close().await;
         }
         Some(interval_secs) => {
-            info!(interval_secs, "watch mode enabled — press Ctrl-C to stop");
+            const STEP_DOWN_AFTER: u32 = 5;
+            const STEP_DOWN_FACTOR: u64 = 2;
+
+            let base_secs = interval_secs;
+            let max_idle = if args.max_idle_secs < base_secs {
+                warn!(
+                    base_secs,
+                    max_idle_secs = args.max_idle_secs,
+                    "max-idle-interval less than watch interval, clamping"
+                );
+                base_secs
+            } else {
+                args.max_idle_secs
+            };
+            let mut current_secs = base_secs;
+            let mut idle_streak: u32 = 0;
+
+            info!(
+                base_secs,
+                max_idle_secs = max_idle,
+                "watch mode enabled — press Ctrl-C to stop"
+            );
+
             loop {
-                if let Err(e) = run_once(
+                let changed = match run_once(
                     &db,
                     &source_path,
                     &plans_path,
@@ -211,12 +240,44 @@ async fn main() -> Result<()> {
                 )
                 .await
                 {
-                    warn!(error = %e, "run failed, will retry");
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(error = %e, "run failed, will retry");
+                        false
+                    }
+                };
+
+                if changed {
+                    if current_secs != base_secs {
+                        info!(
+                            idle_streak,
+                            interval = base_secs,
+                            "activity detected: resuming fast polling"
+                        );
+                    }
+                    idle_streak = 0;
+                    current_secs = base_secs;
+                } else {
+                    idle_streak += 1;
+                    if idle_streak >= STEP_DOWN_AFTER {
+                        let candidate = current_secs.saturating_mul(STEP_DOWN_FACTOR).min(max_idle);
+                        if candidate != current_secs {
+                            info!(
+                                idle_streak,
+                                old = current_secs,
+                                new = candidate,
+                                "idle: slowing poll frequency"
+                            );
+                            current_secs = candidate;
+                        }
+                    }
                 }
+
+                trace!(sleep_secs = current_secs, "sleeping until next poll");
 
                 // Sleep until next poll, but wake immediately on Ctrl-C.
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {}
+                    _ = tokio::time::sleep(Duration::from_secs(current_secs)) => {}
                     _ = tokio::signal::ctrl_c() => {
                         info!("received Ctrl-C, shutting down");
                         break;

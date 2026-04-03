@@ -24,6 +24,7 @@ pub struct UserEvent {
     pub message: UserMessage,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[allow(unused)]
     #[serde(default)]
     pub slug: Option<String>,
 }
@@ -144,5 +145,6 @@ pub struct MessageRow {
     pub cache_creation_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    #[allow(unused)]
     pub cwd: Option<String>,
 }
