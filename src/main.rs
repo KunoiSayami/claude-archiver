@@ -4,7 +4,7 @@ mod scanner;
 mod types;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{debug, info, trace, warn};
@@ -21,6 +21,9 @@ struct Args {
     /// Path to the SQLite database
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 
     /// Path to ~/.claude/projects/ (auto-detected if omitted)
     #[arg(long, value_name = "PATH")]
@@ -41,6 +44,15 @@ struct Args {
     /// Maximum polling interval when idle, in seconds (default: 1200 = 20 min)
     #[arg(long, value_name = "SECONDS", default_value_t = 1200)]
     max_idle_secs: u64,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Check whether a file path has been recorded in the database
+    Check {
+        /// Path to the file to check
+        path: PathBuf,
+    },
 }
 
 fn default_db_path() -> Result<PathBuf> {
@@ -74,7 +86,7 @@ async fn run_once(
     let mut changed = false;
 
     for project in &projects {
-        debug!(slug = %project.slug, "processing project");
+        trace!(slug = %project.slug, "processing project");
         db.upsert_project(&project.slug, None).await?;
 
         let sessions = scanner::discover_sessions(&project.path)?;
@@ -184,15 +196,30 @@ async fn main() -> Result<()> {
         Some(ref p) => p.clone(),
         None => default_db_path()?,
     };
+
+    info!(db = %db_path.display(), "claude-archiver starting");
+
+    let db = Db::open(&db_path).await?;
+
+    if let Some(Command::Check { path }) = args.command {
+        let path_str = path.to_string_lossy().to_string();
+        let known = db.is_file_known(&path_str).await?;
+        if known {
+            info!(path = %path_str, "file is in database");
+        } else {
+            info!(path = %path_str, "file is NOT in database");
+        }
+        db.close().await;
+        return Ok(());
+    }
+
     let source_path = match args.source {
         Some(ref p) => p.clone(),
         None => default_source_path()?,
     };
     let plans_path = default_plans_path()?;
 
-    info!(db = %db_path.display(), source = %source_path.display(), "claude-archiver starting");
-
-    let db = Db::open(&db_path).await?;
+    info!(source = %source_path.display(), "archiving");
 
     match args.watch {
         None => {

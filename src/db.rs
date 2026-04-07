@@ -122,6 +122,15 @@ impl Db {
         Ok(())
     }
 
+    pub async fn is_file_known(&self, path: &str) -> Result<bool> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT modified_at FROM processed_files WHERE path = ?")
+                .bind(path)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.is_some())
+    }
+
     pub async fn is_file_current(&self, path: &str, mtime: u64) -> Result<bool> {
         let mtime = mtime as i64;
         let row: Option<(i64,)> =
