@@ -78,7 +78,7 @@ async fn run_once(
     force: bool,
 ) -> Result<bool> {
     let projects = scanner::discover_projects(source_path, project_filter)?;
-    info!(count = projects.len(), "discovered projects");
+    //info!(count = projects.len(), "discovered projects");
 
     let mut total_files = 0usize;
     let mut skipped = 0usize;
@@ -102,7 +102,7 @@ async fn run_once(
             }
 
             changed = true;
-            info!(session_id = %session.session_id, slug = %project.slug, "archiving session");
+            debug!(session_id = %session.session_id, slug = %project.slug, "archiving session");
 
             db.upsert_session(&session.session_id, &project.slug, None, None)
                 .await?;
@@ -154,12 +154,10 @@ async fn run_once(
         }
     }
 
-    info!(total_files, skipped, messages, "run complete");
-
+    let mut plans_archived = 0usize;
     // ── Plan files ────────────────────────────────────────────────────────────
     if plans_path.is_dir() {
         let plans = scanner::discover_plans(plans_path)?;
-        let mut plans_archived = 0usize;
         for plan in plans {
             if !force && db.is_plan_current(&plan.slug, plan.mtime).await? {
                 continue;
@@ -175,7 +173,14 @@ async fn run_once(
                 Err(e) => warn!(slug = %plan.slug, error = %e, "could not read plan file"),
             }
         }
-        info!(plans_archived, "plans archived");
+    }
+    if plans_path.is_dir() && plans_archived > 0 {
+        info!(
+            total_files,
+            skipped, messages, plans_archived, "run complete"
+        );
+    } else if messages > 0 {
+        info!(total_files, skipped, messages, "run complete");
     }
 
     Ok(changed)
@@ -279,7 +284,7 @@ async fn main() -> Result<()> {
 
                 if changed {
                     if current_secs != base_secs {
-                        info!(
+                        trace!(
                             idle_streak,
                             interval = base_secs,
                             "activity detected: resuming fast polling"
@@ -292,7 +297,7 @@ async fn main() -> Result<()> {
                     idle_streak += 1;
                     if idle_streak >= STEP_DOWN_AFTER && current_secs < max_idle {
                         let next = current_secs.saturating_add(prev_secs).min(max_idle);
-                        info!(
+                        trace!(
                             idle_streak,
                             old = current_secs,
                             new = next,
