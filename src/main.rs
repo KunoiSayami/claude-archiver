@@ -84,12 +84,14 @@ async fn run_once(
     let mut skipped = 0usize;
     let mut messages = 0usize;
     let mut changed = false;
+    let mut updated_projects: Vec<&str> = Vec::new();
 
     for project in &projects {
         trace!(slug = %project.slug, "processing project");
         db.upsert_project(&project.slug, None).await?;
 
         let sessions = scanner::discover_sessions(&project.path)?;
+        let mut project_changed = false;
 
         for session in sessions {
             let path_str = session.path.to_string_lossy().to_string();
@@ -102,7 +104,8 @@ async fn run_once(
             }
 
             changed = true;
-            debug!(session_id = %session.session_id, slug = %project.slug, "archiving session");
+            project_changed = true;
+            trace!(session_id = %session.session_id, slug = %project.slug, "archiving session");
 
             db.upsert_session(&session.session_id, &project.slug, None, None)
                 .await?;
@@ -136,7 +139,7 @@ async fn run_once(
                         messages += 1;
                     }
                     ParsedEvent::AiTitle { session_id, title } => {
-                        debug!(session_id = %session_id, title = %title, "set ai-title");
+                        trace!(session_id = %session_id, title = %title, "set ai-title");
                         db.update_session_title(&session_id, &title).await?;
                     }
                     ParsedEvent::Raw {
@@ -151,6 +154,10 @@ async fn run_once(
             }
 
             db.mark_file_processed(&path_str, session.mtime).await?;
+        }
+
+        if project_changed {
+            updated_projects.push(&project.slug);
         }
     }
 
@@ -174,13 +181,15 @@ async fn run_once(
             }
         }
     }
-    if plans_path.is_dir() && plans_archived > 0 {
+    if messages > 0 || plans_archived > 0 {
         info!(
             total_files,
-            skipped, messages, plans_archived, "run complete"
+            skipped,
+            messages,
+            plans_archived,
+            projects = ?updated_projects,
+            "run complete"
         );
-    } else if messages > 0 {
-        info!(total_files, skipped, messages, "run complete");
     }
 
     Ok(changed)
