@@ -42,14 +42,35 @@ pub fn discover_projects(source: &Path, filter: Option<&str>) -> Result<Vec<Proj
     Ok(projects)
 }
 
-pub fn discover_sessions(project_dir: &Path) -> Result<Vec<SessionEntry>> {
+fn collect_jsonl(dir: &Path, session_id: &str, sessions: &mut Vec<SessionEntry>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            let mtime = entry
+                .metadata()?
+                .modified()?
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            sessions.push(SessionEntry {
+                session_id: session_id.to_string(),
+                path,
+                mtime,
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn discover_sessions(project_dir: &Path, include_subagents: bool) -> Result<Vec<SessionEntry>> {
     let mut sessions = Vec::new();
 
     for entry in std::fs::read_dir(project_dir)? {
         let entry = entry?;
         let path = entry.path();
-        // Only top-level *.jsonl files (not inside session subdirs)
         if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            // Top-level session files: stem is the session UUID
             let session_id = path
                 .file_stem()
                 .and_then(|n| n.to_str())
@@ -69,6 +90,20 @@ pub fn discover_sessions(project_dir: &Path) -> Result<Vec<SessionEntry>> {
                 path,
                 mtime,
             });
+        } else if include_subagents && path.is_dir() {
+            // <session-uuid>/subagents/*.jsonl — session UUID is the dir name
+            let session_id = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if session_id.is_empty() {
+                continue;
+            }
+            let subagents_dir = path.join("subagents");
+            if subagents_dir.is_dir() {
+                collect_jsonl(&subagents_dir, &session_id, &mut sessions)?;
+            }
         }
     }
 

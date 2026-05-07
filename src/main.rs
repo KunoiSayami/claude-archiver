@@ -33,6 +33,10 @@ struct Args {
     #[arg(long, value_name = "SLUG")]
     project: Option<String>,
 
+    /// Also archive subagent session files (<session-uuid>/subagents/*.jsonl)
+    #[arg(long)]
+    subagents: bool,
+
     /// Re-process files even if mtime is unchanged
     #[arg(long)]
     force: bool,
@@ -75,6 +79,7 @@ async fn run_once(
     source_path: &PathBuf,
     plans_path: &PathBuf,
     project_filter: Option<&str>,
+    include_subagents: bool,
     force: bool,
 ) -> Result<bool> {
     let projects = scanner::discover_projects(source_path, project_filter)?;
@@ -90,7 +95,7 @@ async fn run_once(
         trace!(slug = %project.slug, "processing project");
         db.upsert_project(&project.slug, None).await?;
 
-        let sessions = scanner::discover_sessions(&project.path)?;
+        let sessions = scanner::discover_sessions(&project.path, include_subagents)?;
         let mut project_changed = false;
 
         for session in sessions {
@@ -242,6 +247,7 @@ async fn main() -> Result<()> {
                 &source_path,
                 &plans_path,
                 args.project.as_deref(),
+                args.subagents,
                 args.force,
             )
             .await?;
@@ -280,6 +286,7 @@ async fn main() -> Result<()> {
                     &source_path,
                     &plans_path,
                     args.project.as_deref(),
+                    args.subagents,
                     args.force,
                 )
                 .await
