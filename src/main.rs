@@ -74,10 +74,16 @@ fn default_plans_path() -> Result<PathBuf> {
     Ok(home.join(".claude").join("plans"))
 }
 
+fn default_global_memory_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home dir"))?;
+    Ok(home.join(".claude").join("memory"))
+}
+
 async fn run_once(
     db: &Db,
     source_path: &PathBuf,
     plans_path: &PathBuf,
+    global_memory_path: &PathBuf,
     project_filter: Option<&str>,
     include_subagents: bool,
     force: bool,
@@ -186,12 +192,71 @@ async fn run_once(
             }
         }
     }
-    if messages > 0 || plans_archived > 0 {
+
+    // ── Memory files ─────────────────────────────────────────────────────────
+    let mut memories_archived = 0usize;
+
+    // Global memory: ~/.claude/memory/*.md
+    if global_memory_path.is_dir() {
+        let entries = scanner::discover_memory_files(global_memory_path, "global")?;
+        for mem in entries {
+            if !force
+                && db
+                    .is_memory_current(&mem.scope, &mem.name, mem.mtime)
+                    .await?
+            {
+                continue;
+            }
+            match std::fs::read_to_string(&mem.path) {
+                Ok(content) => {
+                    db.insert_memory_revision(&mem.scope, &mem.name, &content, mem.mtime)
+                        .await?;
+                    trace!(scope = %mem.scope, name = %mem.name, "archived memory");
+                    memories_archived += 1;
+                    changed = true;
+                }
+                Err(e) => warn!(name = %mem.name, error = %e, "could not read global memory file"),
+            }
+        }
+    }
+
+    // Per-project memory: ~/.claude/projects/<slug>/memory/*.md
+    for project in &projects {
+        let mem_dir = project.path.join("memory");
+        if !mem_dir.is_dir() {
+            continue;
+        }
+        let entries = scanner::discover_memory_files(&mem_dir, &project.slug)?;
+        for mem in entries {
+            if !force
+                && db
+                    .is_memory_current(&mem.scope, &mem.name, mem.mtime)
+                    .await?
+            {
+                continue;
+            }
+            match std::fs::read_to_string(&mem.path) {
+                Ok(content) => {
+                    db.insert_memory_revision(&mem.scope, &mem.name, &content, mem.mtime)
+                        .await?;
+                    trace!(scope = %mem.scope, name = %mem.name, "archived memory");
+                    memories_archived += 1;
+                    changed = true;
+                }
+                Err(e) => {
+                    warn!(scope = %mem.scope, name = %mem.name, error = %e, "could not read memory file")
+                }
+            }
+        }
+    }
+
+    if messages > 0 || plans_archived > 0 || memories_archived > 0 {
         info!(
             total_files,
             skipped,
             messages,
             plans_archived,
+            memories_archived,
             projects = ?updated_projects,
             "run complete"
         );
@@ -237,6 +302,7 @@ async fn main() -> Result<()> {
         None => default_source_path()?,
     };
     let plans_path = default_plans_path()?;
+    let global_memory_path = default_global_memory_path()?;
 
     info!(source = %source_path.display(), "archiving");
 
@@ -246,6 +312,7 @@ async fn main() -> Result<()> {
                 &db,
                 &source_path,
                 &plans_path,
+                &global_memory_path,
                 args.project.as_deref(),
                 args.subagents,
                 args.force,
@@ -285,6 +352,7 @@ async fn main() -> Result<()> {
                     &db,
                     &source_path,
                     &plans_path,
+                    &global_memory_path,
                     args.project.as_deref(),
                     args.subagents,
                     args.force,

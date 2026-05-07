@@ -178,4 +178,38 @@ impl Db {
                 .await?;
         Ok(row.is_some())
     }
+
+    pub async fn insert_memory_revision(
+        &self,
+        scope: &str,
+        name: &str,
+        content: &str,
+        mtime: u64,
+    ) -> Result<()> {
+        let mtime = mtime as i64;
+        sqlx::query(
+            "INSERT INTO memory_files(scope, name, content, modified_at) VALUES(?,?,?,?)
+             ON CONFLICT(scope, name, modified_at) DO NOTHING",
+        )
+        .bind(scope)
+        .bind(name)
+        .bind(content)
+        .bind(mtime)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn is_memory_current(&self, scope: &str, name: &str, mtime: u64) -> Result<bool> {
+        let mtime = mtime as i64;
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT modified_at FROM memory_files WHERE scope = ? AND name = ? AND modified_at = ?",
+        )
+        .bind(scope)
+        .bind(name)
+        .bind(mtime)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
 }

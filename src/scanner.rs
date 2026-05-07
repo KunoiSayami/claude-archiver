@@ -117,6 +117,47 @@ pub struct PlanEntry {
     pub mtime: u64,
 }
 
+pub struct MemoryEntry {
+    pub scope: String,
+    pub name: String,
+    pub path: PathBuf,
+    pub mtime: u64,
+}
+
+pub fn discover_memory_files(memory_dir: &Path, scope: &str) -> Result<Vec<MemoryEntry>> {
+    let mut entries = Vec::new();
+
+    for entry in std::fs::read_dir(memory_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let mtime = entry
+                .metadata()?
+                .modified()?
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            entries.push(MemoryEntry {
+                scope: scope.to_string(),
+                name,
+                path,
+                mtime,
+            });
+        }
+    }
+
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
+}
+
 pub fn discover_plans(plans_dir: &Path) -> Result<Vec<PlanEntry>> {
     let mut plans = Vec::new();
 
