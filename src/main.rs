@@ -267,12 +267,18 @@ async fn run_once(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let running_under_systemd = std::env::var_os("JOURNAL_STREAM").is_some();
+
+    let subscriber = tracing_subscriber::fmt().with_env_filter(
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+    );
+
+    if running_under_systemd {
+        subscriber.without_time().init();
+    } else {
+        subscriber.init();
+    }
 
     let args = Args::parse();
 
